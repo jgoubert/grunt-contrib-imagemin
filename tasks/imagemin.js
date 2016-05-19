@@ -1,12 +1,13 @@
 'use strict';
 var fs = require('fs');
-var os = require('os');
 var path = require('path');
-var async = require('async');
 var chalk = require('chalk');
-var prettyBytes = require('pretty-bytes');
-var Imagemin = require('imagemin');
-var rename = require('gulp-rename');
+var async = require('async');
+const Imagemin = require('imagemin');
+const imageminJpegtran = require('imagemin-jpegtran');
+const imageminOptipng = require('imagemin-optipng');
+//const imageminMozjpeg = require('imagemin-mozjpeg');
+//const imageminPngquant = require('imagemin-pngquant');
 
 /*
  * grunt-contrib-imagemin
@@ -18,76 +19,39 @@ var rename = require('gulp-rename');
 
 module.exports = function (grunt) {
     grunt.registerMultiTask('imagemin', 'Minify PNG, JPEG, GIF and SVG images', function () {
-        var done = this.async();
         var files = this.files;
-        var totalSaved = 0;
+        var finalDest = {};
         var options = this.options({
             interlaced: true,
             optimizationLevel: 3,
             progressive: true
         });
 
-        async.eachLimit(files, os.cpus().length, function (file, next) {
-            var msg;
-            var imagemin = new Imagemin()
-                .src(file.src[0])
-                .dest(path.dirname(file.dest))
-                .use(Imagemin.jpegtran(options))
-                .use(Imagemin.gifsicle(options))
-                .use(Imagemin.optipng(options))
-                .use(Imagemin.svgo({plugins: options.svgoPlugins || []}));
-
-            if (options.use) {
-                options.use.forEach(imagemin.use.bind(imagemin));
-            }
-
-            if (path.basename(file.src[0]) !== path.basename(file.dest)) {
-                imagemin.use(rename(path.basename(file.dest)));
-            }
-
-            fs.stat(file.src[0], function (err, stats) {
-                if (err) {
-                    grunt.warn(err + ' in file ' + file.src[0]);
-                    return next();
-                }
-
-                imagemin.run(function (err, data) {
-                    if (err) {
-                        grunt.warn(err + ' in file ' + file.src[0]);
-                        return next();
+        var done = this.async();
+        setTimeout(function() {
+            //equivalent to running grunt foo bar on the cli
+            var processed = 0;
+            for (var i = 0; i <= files.length - 1; i++) {
+                finalDest[path.resolve(path.dirname(files[i].dest),files[i].src[0])] = files[i].dest;
+                Imagemin([files[i].src[0]], path.dirname(files[i].dest), {
+                  plugins: [
+                    imageminJpegtran(options),
+                    imageminOptipng(options)
+                    //add gif, svg if needed
+                  ]
+                }).then(data => {
+                    fs.rename(data[0].path, finalDest[data[0].path]);
+                    grunt.verbose.writeln(chalk.green('✔ ') + finalDest[data[0].path]);
+                    processed++;
+                    if(processed === files.length) {
+                        done();
                     }
-
-                    var origSize = stats.size;
-                    var diffSize = origSize - data[0].contents.length;
-
-                    totalSaved += diffSize;
-
-                    if (diffSize < 10) {
-                        msg = 'already optimized';
-                    } else {
-                        msg = [
-                            'saved ' + prettyBytes(diffSize) + ' -',
-                            (diffSize / origSize * 100).toFixed() + '%'
-                        ].join(' ');
-                    }
-
-                    grunt.verbose.writeln(chalk.green('✔ ') + file.src[0] + chalk.gray(' (' + msg + ')'));
-                    process.nextTick(next);
+                }, function(err) {
+                    grunt.warn(err);
                 });
-            });
-        }, function (err) {
-            if (err) {
-                grunt.warn(err);
             }
-
-            var msg = [
-                'Minified ' + files.length,
-                files.length === 1 ? 'image' : 'images',
-                chalk.gray('(saved ' + prettyBytes(totalSaved) + ')')
-            ].join(' ');
-
-            grunt.log.writeln(msg);
-            done();
+            
         });
+
     });
 };
